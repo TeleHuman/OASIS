@@ -2,6 +2,9 @@ import argparse
 import json
 import time
 
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+
 import numpy as np
 import mujoco as mj
 import mujoco.viewer as mjv
@@ -14,18 +17,9 @@ import redis
 from rich import print
 from general_motion_retargeting import XRobotStreamer
 
-from tasks.params import DEFAULT_MIMIC_OBS, DEFAULT_HAND_POSE
+from tasks.params import DEFAULT_MIMIC_OBS, DEFAULT_HAND_POSE, ROBOT_XML_DICT, ROBOT_BASE_DICT, REDIS_ACTION_KEY
 from data_utils.fps_monitor import FPSMonitor
 
-import pathlib                                                                 
-_ASSET_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent / "assets" 
-ROBOT_XML_DICT = {                                                             
-    "unitree_g1": _ASSET_ROOT / "unitree_g1" / "g1_mocap_29dof.xml",                                                       
-}                                       
-ROBOT_BASE_DICT = {                                                            
-    "unitree_g1": "pelvis",                                                                                         
-}                                                                              
-REDIS_ACTION_KEY = "action_payload_unitree_g1" 
 
 def _root_ang_vel_w(cur_quat_wxyz, prev_quat_wxyz, dt):
     """World-frame angular velocity from wxyz quats using scipy Rotation."""
@@ -100,6 +94,10 @@ class StateMachine:
         left_key_two_just_pressed = left_key_two_current and not self.left_key_two_was_pressed
         left_axis_click_just_pressed = left_axis_click_current and not self.left_axis_click_was_pressed
 
+
+        # Right A (key_one): reset robot. (B / key_two is intercepted by the
+        # PICO XRoboToolkit APK as a stream display-mode toggle, so it cannot
+        # be used here.)
         if right_key_just_pressed:
             self.reset_robot = True
             self.hand_left_position = 0.0
@@ -211,7 +209,7 @@ class XRobotTeleopToRobot:
     def setup_redis_connection(self):
         """Setup Redis connection"""
         redis_ip = self.args.redis_ip
-        self.redis_client = redis.Redis(host=redis_ip, port=6379, db=0)
+        self.redis_client = redis.Redis(host=redis_ip, port=6379, db=0, password="zjk1217...")
         self.redis_pipeline = self.redis_client.pipeline()
         self.redis_client.ping()
         print("Redis connected successfully")
@@ -333,6 +331,8 @@ class XRobotTeleopToRobot:
                 "start_save": self.state_machine.start_save,
                 "reset_robot": self.state_machine.reset_robot,
             }        
+            # self.redis_pipeline.rpush(combined_key, json.dumps(combined_action))
+            # self.redis_pipeline.ltrim(combined_key, -50, -1)  # 保持队列新鲜，防止堆积
             self.redis_pipeline.set(combined_key, json.dumps(combined_action))
             self.redis_pipeline.execute()        
             
